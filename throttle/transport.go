@@ -207,7 +207,8 @@ func (t *Transport) write(req *http.Request, info *requestInfo, entry *logEntry)
 			return nil, err
 		}
 	}
-	entry.Waited = t.now().Sub(queued).Milliseconds()
+	// Include time spent queued behind other processes' writes.
+	entry.Waited = t.now().Sub(entry.Time).Milliseconds()
 
 	resp, err := t.next.RoundTrip(req)
 	if err != nil || resp.StatusCode < 200 || resp.StatusCode > 299 {
