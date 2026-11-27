@@ -50,7 +50,6 @@ import (
 	workflowCmd "github.com/cli/cli/v2/pkg/cmd/workflow"
 	"github.com/cli/cli/v2/pkg/cmdutil"
 	"github.com/cli/cli/v2/pkg/extensions"
-	throttleCmd "github.com/cli/cli/v2/throttle/cmd"
 	"github.com/google/shlex"
 	"github.com/spf13/cobra"
 )
@@ -161,7 +160,6 @@ func NewCmdRoot(f *cmdutil.Factory, telemetry ghtelemetry.InvocationRecorder, ve
 	cmd.AddCommand(creditsCmd.NewCmdCredits(f, nil))
 	cmd.AddCommand(licensesCmd.NewCmdLicenses(f))
 	cmd.AddCommand(sendTelemetryCmd.NewCmdSendTelemetry(f))
-	cmd.AddCommand(throttleCmd.NewCmdThrottle(f))
 
 	// below here at the commands that require the "intelligent" BaseRepo resolver
 	repoResolvingCmdFactory := *f
@@ -181,6 +179,8 @@ func NewCmdRoot(f *cmdutil.Factory, telemetry ghtelemetry.InvocationRecorder, ve
 	cmd.AddCommand(labelCmd.NewCmdLabel(&repoResolvingCmdFactory))
 	cmd.AddCommand(cacheCmd.NewCmdCache(&repoResolvingCmdFactory))
 	cmd.AddCommand(apiCmd.NewCmdApi(&repoResolvingCmdFactory, nil))
+
+	cmd.AddCommand(newCmdThrottle(f)) // gh-throttle
 
 	// Help topics
 	var referenceCmd *cobra.Command

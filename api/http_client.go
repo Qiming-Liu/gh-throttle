@@ -11,7 +11,6 @@ import (
 
 	"github.com/cli/cli/v2/internal/gh/ghtelemetry"
 	"github.com/cli/cli/v2/pkg/auth"
-	"github.com/cli/cli/v2/throttle"
 	"github.com/cli/cli/v2/utils"
 	ghAPI "github.com/cli/go-gh/v2/pkg/api"
 	ghauth "github.com/cli/go-gh/v2/pkg/auth"
@@ -69,8 +68,6 @@ func NewHTTPClient(opts HTTPClientOptions) (*http.Client, error) {
 		AuthToken:          "none",
 		LogIgnoreEnv:       true,
 		SkipDefaultHeaders: opts.SkipDefaultHeaders,
-		// gh-throttle: pace every GitHub API request right before it leaves the machine.
-		Transport: throttle.NewTransport(http.DefaultTransport),
 	}
 
 	debugEnabled, debugValue := utils.IsDebugEnabled()
@@ -99,6 +96,8 @@ func NewHTTPClient(opts HTTPClientOptions) (*http.Client, error) {
 		clientOpts.EnableCache = opts.EnableCache
 		clientOpts.CacheTTL = opts.CacheTTL
 	}
+
+	clientOpts.Transport = throttleTransport() // gh-throttle
 
 	client, err := ghAPI.NewHTTPClient(clientOpts)
 	if err != nil {
