@@ -11,9 +11,45 @@
 
 GitHub CLI Throttle 可以直接替换 `gh`。所有命令用法完全不变，区别在于：本机所有 `gh` 进程的写操作会排队、按节奏发送；遇到 GitHub 限流时所有进程一起退避；读命令从共享缓存返回。支持 macOS、Windows 和 Linux。
 
+## 安装
+
+### macOS 和 Linux
+
+```shell
+curl -fsSL https://raw.githubusercontent.com/Qiming-Liu/gh-throttle/gh-throttle/install.sh | sh
+```
+
+### Windows（PowerShell）
+
+```powershell
+irm https://raw.githubusercontent.com/Qiming-Liu/gh-throttle/gh-throttle/install.ps1 | iex
+```
+
+脚本会下载适合你平台的最新版本，校验 checksum，把 `gh` 装到 `~/.local/bin`（Windows 是 `%LOCALAPPDATA%\Programs\gh-throttle\bin`），并把它放在 `PATH` 最前面。如果装了官方的 `gh`，脚本会先问你要不要卸载，只有输入 `y` 或 `Y` 才会卸载。卸掉之后，agent 就没法退回去用官方的 `gh`。**更新时再运行一次同一条命令即可。**
+
+然后打开一个新终端，运行：
+
+```shell
+gh --version
+gh auth login
+gh throttle status
+```
+
+想装指定版本，设置 `GH_THROTTLE_VERSION=2.106.0`。也可以自己从 [Releases 页面][releases page]下载压缩包，把 `bin/gh` 放进 `PATH`，排在其他 `gh` 前面。
+
+### 从源码编译
+
+需要 Go 1.27 或更新版本：
+
+```shell
+git clone https://github.com/Qiming-Liu/gh-throttle
+cd gh-throttle
+go install -ldflags "-X github.com/cli/cli/v2/internal/build.Version=2.105.0-throttle" ./cmd/gh
+```
+
 ## 文档
 
-安装方式[见下文](#安装)。`gh` 本身的用法请[看官方手册](https://cli.github.com/manual/)。限流相关命令：
+`gh` 本身的用法请[看官方手册](https://cli.github.com/manual/)。限流相关命令：
 
 ```shell
 gh throttle status   # 熔断器、冷却状态、本分钟和本小时用掉的写操作次数
@@ -94,42 +130,6 @@ GitHub CLI Throttle 的全部代码都在 [`throttle/`](../throttle) 里。它�
 | `pkg/cmd/root/root.go` | 一行，调用 `pkg/cmd/root/gh_throttle.go` 里的 `newCmdThrottle(f)`：注册 `gh throttle` 命令 |
 
 `trunk` 分支是上游的镜像，`gh-throttle` 分支在它之上放我们的改动。每天有一个 workflow 把 `gh-throttle` rebase 到上游最新代码上（所以没有 merge commit），`cli/cli` 一发新版，就发布对应的版本。
-
-## 安装
-
-### macOS 和 Linux
-
-```shell
-curl -fsSL https://raw.githubusercontent.com/Qiming-Liu/gh-throttle/gh-throttle/install.sh | sh
-```
-
-### Windows（PowerShell）
-
-```powershell
-irm https://raw.githubusercontent.com/Qiming-Liu/gh-throttle/gh-throttle/install.ps1 | iex
-```
-
-脚本会下载适合你平台的最新版本，校验 checksum，把 `gh` 装到 `~/.local/bin`（Windows 是 `%LOCALAPPDATA%\Programs\gh-throttle\bin`），并把它放在 `PATH` 最前面。如果装了官方的 `gh`，脚本会先问你要不要卸载，只有输入 `y` 或 `Y` 才会卸载。卸掉之后，agent 就没法退回去用官方的 `gh`。**更新时再运行一次同一条命令即可。**
-
-然后打开一个新终端，运行：
-
-```shell
-gh --version
-gh auth login
-gh throttle status
-```
-
-想装指定版本，设置 `GH_THROTTLE_VERSION=2.106.0`。也可以自己从 [Releases 页面][releases page]下载压缩包，把 `bin/gh` 放进 `PATH`，排在其他 `gh` 前面。
-
-### 从源码编译
-
-需要 Go 1.27 或更新版本：
-
-```shell
-git clone https://github.com/Qiming-Liu/gh-throttle
-cd gh-throttle
-go install -ldflags "-X github.com/cli/cli/v2/internal/build.Version=2.105.0-throttle" ./cmd/gh
-```
 
 ## 它防不住什么
 

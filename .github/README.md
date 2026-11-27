@@ -11,9 +11,46 @@ In November 2026 my GitHub account was suspended without warning. My profile, my
 
 GitHub CLI Throttle is a drop-in replacement for `gh`. Every command works exactly as before, but writes from every `gh` process on the machine are queued and paced, GitHub rate limits make all of them back off together, and read commands are served from a shared cache. It supports macOS, Windows, and Linux.
 
+<!-- this anchor is linked to from elsewhere, so avoid renaming it -->
+## Installation
+
+### macOS & Linux
+
+```shell
+curl -fsSL https://raw.githubusercontent.com/Qiming-Liu/gh-throttle/gh-throttle/install.sh | sh
+```
+
+### Windows (PowerShell)
+
+```powershell
+irm https://raw.githubusercontent.com/Qiming-Liu/gh-throttle/gh-throttle/install.ps1 | iex
+```
+
+The script downloads the latest release for your platform, checks its checksum, and installs `gh` to `~/.local/bin` (Windows: `%LOCALAPPDATA%\Programs\gh-throttle\bin`), putting it first on your `PATH`. If the official `gh` is installed, it asks before uninstalling it, and only does so if you type `y` or `Y`; agents then can't fall back to it. **Run the same command again to update.**
+
+Then open a new terminal and run:
+
+```shell
+gh --version
+gh auth login
+gh throttle status
+```
+
+Set `GH_THROTTLE_VERSION=2.106.0` to install a specific release. You can also download an archive yourself from the [releases page][], and put `bin/gh` on your `PATH` ahead of any other `gh`.
+
+### Build from source
+
+With Go 1.27 or newer:
+
+```shell
+git clone https://github.com/Qiming-Liu/gh-throttle
+cd gh-throttle
+go install -ldflags "-X github.com/cli/cli/v2/internal/build.Version=2.105.0-throttle" ./cmd/gh
+```
+
 ## Documentation
 
-For [installation options see below](#installation). For usage of `gh` itself, [see the manual](https://cli.github.com/manual/). For the throttle:
+For usage of `gh` itself, [see the manual](https://cli.github.com/manual/). For the throttle:
 
 ```shell
 gh throttle status   # circuit breaker, cooldowns, writes used this minute and hour
@@ -94,43 +131,6 @@ All of GitHub CLI Throttle lives in [`throttle/`](../throttle). It is wired into
 | `pkg/cmd/root/root.go` | one line, `newCmdThrottle(f)` from `pkg/cmd/root/gh_throttle.go`: registers `gh throttle` |
 
 The `trunk` branch mirrors upstream, and `gh-throttle` carries the changes on top. A daily workflow rebases `gh-throttle` onto upstream (so there are no merge commits) and publishes a matching release whenever `cli/cli` releases.
-
-<!-- this anchor is linked to from elsewhere, so avoid renaming it -->
-## Installation
-
-### macOS & Linux
-
-```shell
-curl -fsSL https://raw.githubusercontent.com/Qiming-Liu/gh-throttle/gh-throttle/install.sh | sh
-```
-
-### Windows (PowerShell)
-
-```powershell
-irm https://raw.githubusercontent.com/Qiming-Liu/gh-throttle/gh-throttle/install.ps1 | iex
-```
-
-The script downloads the latest release for your platform, checks its checksum, and installs `gh` to `~/.local/bin` (Windows: `%LOCALAPPDATA%\Programs\gh-throttle\bin`), putting it first on your `PATH`. If the official `gh` is installed, it asks before uninstalling it, and only does so if you type `y` or `Y`; agents then can't fall back to it. **Run the same command again to update.**
-
-Then open a new terminal and run:
-
-```shell
-gh --version
-gh auth login
-gh throttle status
-```
-
-Set `GH_THROTTLE_VERSION=2.106.0` to install a specific release. You can also download an archive yourself from the [releases page][], and put `bin/gh` on your `PATH` ahead of any other `gh`.
-
-### Build from source
-
-With Go 1.27 or newer:
-
-```shell
-git clone https://github.com/Qiming-Liu/gh-throttle
-cd gh-throttle
-go install -ldflags "-X github.com/cli/cli/v2/internal/build.Version=2.105.0-throttle" ./cmd/gh
-```
 
 ## What it can't protect
 
