@@ -1,0 +1,60 @@
+# Runs install.sh and install.ps1 on real macOS, Linux and Windows runners
+# against a published release. Called by the upstream sync after each release,
+# and can be run by hand.
+name: Throttle install test
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Release to install, e.g. 2.106.0 (empty for the latest)
+        type: string
+        default: ""
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release to install, e.g. 2.106.0 (empty for the latest)
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      GH_THROTTLE_VERSION: ${{ inputs.version }}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: install.sh
+        if: runner.os != 'Windows'
+        run: |
+          export HOME="$RUNNER_TEMP/home" SHELL=/bin/bash
+          mkdir -p "$HOME"
+          sh install.sh </dev/null
+          grep -q '# gh-throttle' "$HOME/.bashrc" "$HOME/.bash_profile" 2>/dev/null
+          "$HOME/.local/bin/gh" --version
+          "$HOME/.local/bin/gh" --version | grep -q -- '-throttle'
+          "$HOME/.local/bin/gh" throttle --help >/dev/null
+
+      - name: install.ps1
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $env:GH_THROTTLE_INSTALL_DIR = "$env:RUNNER_TEMP\gh-throttle"
+          Get-Content .\install.ps1 -Raw | Invoke-Expression
+          $gh = "$env:RUNNER_TEMP\gh-throttle\bin\gh.exe"
+          $v = & $gh --version | Select-Object -First 1
+          $v
+          if ($v -notlike '*-throttle*') { throw "unexpected version: $v" }
+          & $gh throttle --help | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'gh throttle --help failed' }
+          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if (($userPath -split ';')[0] -ne "$env:RUNNER_TEMP\gh-throttle\bin") { throw "not first on user PATH: $userPath" }

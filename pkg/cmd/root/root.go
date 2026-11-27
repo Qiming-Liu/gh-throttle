@@ -180,6 +180,8 @@ func NewCmdRoot(f *cmdutil.Factory, telemetry ghtelemetry.InvocationRecorder, ve
 	cmd.AddCommand(cacheCmd.NewCmdCache(&repoResolvingCmdFactory))
 	cmd.AddCommand(apiCmd.NewCmdApi(&repoResolvingCmdFactory, nil))
 
+	cmd.AddCommand(newCmdThrottle(f)) // gh-throttle
+
 	// Help topics
 	var referenceCmd *cobra.Command
 	for _, ht := range HelpTopics {

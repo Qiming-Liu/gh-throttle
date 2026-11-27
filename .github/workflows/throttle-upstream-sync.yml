@@ -1,0 +1,241 @@
+# Daily sync of cli/cli into this fork, plus a matching release.
+#
+# - trunk is fast-forwarded to upstream trunk (it is a pure mirror).
+# - gh-throttle is rebased onto upstream trunk and force-pushed, so it is
+#   always upstream plus our own commits on top, with no merge commits. A
+#   conflict, a failing build or failing tests fail the run and nothing is
+#   pushed to gh-throttle; resolve it locally and push, the next run picks up
+#   from there. Release tags keep the old commits they point at.
+# - When cli/cli has a newer latest release (vX.Y.Z) than our last
+#   vX.Y.Z-throttle release, and that tag is already in gh-throttle,
+#   gh-throttle is built and released as vX.Y.Z-throttle.
+#
+# Needs secret SYNC_TOKEN: a fine-grained token for this repository with
+# "Contents: read and write" and "Workflows: read and write". GITHUB_TOKEN can
+# not push commits that touch .github/workflows, and upstream often does.
+name: Throttle upstream sync
+
+on:
+  schedule:
+    - cron: "17 21 * * *" # daily, 21:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: throttle-upstream-sync
+  cancel-in-progress: false
+
+env:
+  UPSTREAM: cli/cli
+  BRANCH: gh-throttle
+
+jobs:
+  sync:
+    if: github.repository == 'Qiming-Liu/gh-throttle'
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.release.outputs.release }}
+      version: ${{ steps.release.outputs.version }}
+      sha: ${{ steps.release.outputs.sha }}
+    steps:
+      # Upstream's own workflows (triage, bump-go, deployment...) are meant for
+      # cli/cli only. Keep them disabled here, including ones added later.
+      # Only our own workflows and upstream's tests and lint stay on.
+      - name: Disable upstream workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow list -R "$GITHUB_REPOSITORY" --all --json path,state \
+            --jq '.[] | select(.state == "active") | .path' |
+          while read -r path; do
+            case "$path" in
+              .github/workflows/throttle-upstream-sync.yml | \
+              .github/workflows/throttle-install-test.yml | \
+              .github/workflows/go.yml | \
+              .github/workflows/lint.yml) continue ;;
+            esac
+            echo "disable $path"
+            gh workflow disable -R "$GITHUB_REPOSITORY" "$(basename "$path")"
+          done
+
+      - name: Check token
+        env:
+          SYNC_TOKEN: ${{ secrets.SYNC_TOKEN }}
+        run: |
+          if [ -z "$SYNC_TOKEN" ]; then
+            echo "::error::Secret SYNC_TOKEN is missing (needs Contents + Workflows write on this repo)."
+            exit 1
+          fi
+
+      - name: Check out ${{ env.BRANCH }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.BRANCH }}
+          fetch-depth: 0
+          token: ${{ secrets.SYNC_TOKEN }}
+
+      - name: Fetch upstream
+        run: |
+          git config user.name "Qiming-Liu"
+          git config user.email "Qiming-Liu@users.noreply.github.com"
+          git remote add upstream "https://github.com/$UPSTREAM.git"
+          git fetch --no-tags upstream trunk
+          git fetch --no-tags origin trunk
+          git fetch --force --no-tags upstream 'refs/tags/v*:refs/tags/v*'
+
+      - name: Update trunk mirror
+        run: |
+          if git merge-base --is-ancestor upstream/trunk origin/trunk; then
+            echo "trunk is up to date"
+          elif git merge-base --is-ancestor origin/trunk upstream/trunk; then
+            git push origin upstream/trunk:refs/heads/trunk
+          else
+            echo "::error::origin/trunk has commits that are not in upstream trunk; it must stay a pure mirror."
+            exit 1
+          fi
+
+      - name: Rebase ${{ env.BRANCH }} onto upstream
+        id: rebase
+        run: |
+          echo "old=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          if git merge-base --is-ancestor upstream/trunk HEAD; then
+            echo "$BRANCH already contains upstream trunk"
+            echo "rebased=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          short=$(git rev-parse --short upstream/trunk)
+          if ! git rebase upstream/trunk; then
+            commit=$(git log -1 --format='%h %s' REBASE_HEAD 2>/dev/null || true)
+            files=$(git diff --name-only --diff-filter=U)
+            git rebase --abort
+            {
+              echo "## Rebase conflict"
+              echo
+              echo "Rebasing \`$BRANCH\` onto upstream trunk ($short) conflicts at commit $commit in:"
+              echo
+              echo "$files" | sed 's/^/- `/; s/$/`/'
+              echo
+              echo "Resolve locally:"
+              echo
+              echo '```'
+              echo "git fetch origin && git fetch upstream"
+              echo "git switch $BRANCH && git reset --hard origin/$BRANCH"
+              echo "git rebase upstream/trunk"
+              echo "# fix conflicts, git add, git rebase --continue; then go test ./..."
+              echo "git push --force-with-lease origin $BRANCH"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            for f in $files; do echo "::error file=$f::rebase conflict with upstream trunk"; done
+            exit 1
+          fi
+          echo "rebased=true" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go
+        if: steps.rebase.outputs.rebased == 'true'
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+
+      - name: Build and test
+        if: steps.rebase.outputs.rebased == 'true'
+        run: |
+          go build ./...
+          go test ./...
+
+      # The lease makes the push fail instead of dropping commits that were
+      # pushed to the branch while this run was going.
+      - name: Push ${{ env.BRANCH }}
+        if: steps.rebase.outputs.rebased == 'true'
+        env:
+          OLD: ${{ steps.rebase.outputs.old }}
+        run: git push --force-with-lease="refs/heads/$BRANCH:$OLD" origin "HEAD:refs/heads/$BRANCH"
+
+      - name: Check for new upstream release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(gh release view -R "$UPSTREAM" --json tagName --jq .tagName)
+          ours="$tag-throttle"
+          echo "upstream latest release: $tag"
+          if gh release view -R "$GITHUB_REPOSITORY" "$ours" >/dev/null 2>&1; then
+            echo "$ours already released"
+            exit 0
+          fi
+          if ! git merge-base --is-ancestor "$tag" HEAD; then
+            echo "::warning::$tag is not merged into $BRANCH yet; not releasing."
+            exit 0
+          fi
+          echo "release=$ours" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}-throttle" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "Will release $ours" >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    needs: sync
+    if: needs.sync.outputs.release != ''
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.sync.outputs.release }}
+      VERSION: ${{ needs.sync.outputs.version }}
+      SHA: ${{ needs.sync.outputs.sha }}
+    steps:
+      - name: Check out release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.sync.outputs.sha }}
+
+      - name: Set up Go
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+
+      - name: Build archives
+        run: |
+          set -euo pipefail
+          date=$(date -u +%Y-%m-%d)
+          ldflags="-s -w -X github.com/cli/cli/v2/internal/build.Version=$VERSION -X github.com/cli/cli/v2/internal/build.Date=$date"
+          mkdir -p dist
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            os=${target%/*}; arch=${target#*/}
+            name="gh_${VERSION}_${os}_${arch}"
+            exe=gh; [ "$os" = windows ] && exe=gh.exe
+            mkdir -p "build/$name/bin"
+            CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -ldflags "$ldflags" -o "build/$name/bin/$exe" ./cmd/gh
+            cp LICENSE "build/$name/LICENSE"
+            cp throttle/ghx/LICENSE "build/$name/LICENSE-ghx"
+            if [ "$os" = windows ]; then
+              (cd build && zip -qr "../dist/$name.zip" "$name")
+            else
+              tar -C build -czf "dist/$name.tar.gz" "$name"
+            fi
+          done
+          (cd dist && sha256sum * > "gh_${VERSION}_checksums.txt")
+          ls -l dist
+
+      - name: Smoke test
+        run: |
+          tar -xzf "dist/gh_${VERSION}_linux_amd64.tar.gz" -C /tmp
+          "/tmp/gh_${VERSION}_linux_amd64/bin/gh" --version | tee /dev/stderr | grep -q "gh version $VERSION"
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          upstream_version=${VERSION%-throttle}
+          sed "s/{{VERSION}}/$upstream_version/g" .github/throttle-release-notes.md > notes.md
+          gh release create "$TAG" dist/* \
+            -R "$GITHUB_REPOSITORY" \
+            --target "$SHA" \
+            --title "GitHub CLI $upstream_version Throttle" \
+            --notes-file notes.md \
+            --latest
+
+  install-test:
+    needs: [sync, release]
+    uses: ./.github/workflows/throttle-install-test.yml
+    with:
+      version: ${{ needs.sync.outputs.version }}

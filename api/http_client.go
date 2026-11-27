@@ -96,6 +96,8 @@ func NewHTTPClient(opts HTTPClientOptions) (*http.Client, error) {
 		clientOpts.CacheTTL = opts.CacheTTL
 	}
 
+	clientOpts.Transport = throttleTransport() // gh-throttle
+
 	client, err := ghAPI.NewHTTPClient(clientOpts)
 	if err != nil {
 		return nil, err
